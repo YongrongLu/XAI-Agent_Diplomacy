@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+.pytest_cache/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+.DS_Store
+
+.env*
+!.env.example
+*.log
+*.pem
+*.key
+
+# New benchmark runs are local artifacts. Published reference runs are tracked explicitly.
+evaluation/results/*
