@@ -32,6 +32,18 @@ cd ..
 
 Open <http://127.0.0.1:5173>, select **Distributed V2**, wait until Alice, Bob, and Carol show online, then start the negotiation. The launcher starts the Hub on port 8000, each worker with `python -m backend.agent_worker --agent alice|bob|carol`, and Vite on port 5173. Press **Ctrl-C** in that terminal to stop the processes. If a port is already occupied, stop the process using it before launching again.
 
+## Public browser demo
+
+The public build replays states exported from the actual deterministic V0 engine. Visitors can step through the fictional negotiation and approve or reject Alice's $150 request in their own browser. It does not connect to the backend, run a model, or share session data between visitors. The local V1/V2 and evaluation modes remain available only through the normal local launch above.
+
+```bash
+.venv/bin/python -m scripts.export_public_demo
+npm --prefix frontend run test:public
+npm --prefix frontend run build:public
+```
+
+Serve `frontend/dist/` with any static web host. New source changes to `backend/negotiation_engine.py` should be followed by a fresh export before publishing the public build.
+
 The agents reconnect with increasing delays if the Hub is temporarily unavailable. If an agent disconnects during a request, the current turn is not applied and the session pauses; once all three are online, press **Reconnect & Resume**. A run ends in agreement, rejection/no agreement, or after 10 rounds.
 
 ### Start manually

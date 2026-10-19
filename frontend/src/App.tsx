@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, Check, ChevronDown, CircleHelp, Clock3, Eye, FlaskConical, LockKeyhole, MapPin, Pause, Play, RotateCcw, ShieldCheck, Sparkles, X } from 'lucide-react';
 import EvaluationDashboard from './EvaluationDashboard';
+import { publicDemo } from './publicDemo';
 
 type Policy = { status: string; code: string; explanation: string } | null;
 type Event = { event_id: string; actor: string; action: string; proposal: Record<string, unknown>; public_message: string; policy_outcome: Policy; reasoning_summary?: string | null; step: number };
@@ -9,7 +10,8 @@ type Hotel = { id: string; name: string; total: number; description: string };
 type Outcome = { hotel: Hotel; alice_extra: number; contributions: Record<string, number>; booking_status: string; departure: string; itinerary: { day: number; title: string; details: string }[]; checks: string[] };
 type Session = { status: string; events: Event[]; pending_approval: { id: string; owner: string; action: string; amount: number; authorized_amount: number; explanation: string } | null; outcome: Outcome | null; profiles: Profile[]; step_count: number; decision: string | null; simulation: string; mode: 'scripted' | 'live' | 'distributed'; agents?: Record<string, string> | null; round?: number | null; max_rounds?: number | null; error?: string | null };
 type Inspector = { label: string; profiles: { name: string; private: Record<string, unknown>; policy: Record<string, unknown> }[] };
-const API = 'http://127.0.0.1:8000';
+const PUBLIC_DEMO = import.meta.env.VITE_PUBLIC_DEMO === '1';
+const API = PUBLIC_DEMO ? '' : 'http://127.0.0.1:8000';
 const names: Record<string, string> = { Alice: 'A', Bob: 'B', Carol: 'C', System: '✦' };
 const colors: Record<string, string> = { Alice: 'peach', Bob: 'blue', Carol: 'mint', System: 'dark' };
 const money = (n: number) => `$${n.toLocaleString()}`;
@@ -29,6 +31,12 @@ export default function App() {
   async function request(path: string, method = 'GET', body?: unknown) {
     setBusy(true); setError('');
     try {
+      if (PUBLIC_DEMO) {
+        const data = publicDemo.request(path, method, body as { choice?: string } | undefined);
+        if ('error' in data) throw new Error(data.error);
+        setSession(data as unknown as Session);
+        return data as unknown as Session;
+      }
       const response = await fetch(`${API}${path}`, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
       if (!response.ok) throw new Error(`Request failed (${response.status})`);
       const data = await response.json();
@@ -37,7 +45,7 @@ export default function App() {
     finally { setBusy(false); }
   }
   useEffect(() => { request('/api/session'); }, []);
-  useEffect(() => { fetch(`${API}/api/evaluation/status`).then(r => r.ok ? r.json() : { enabled: false }).then(v => setEvaluationEnabled(v.enabled === true)).catch(() => setEvaluationEnabled(false)); }, []);
+  useEffect(() => { if (!PUBLIC_DEMO) fetch(`${API}/api/evaluation/status`).then(r => r.ok ? r.json() : { enabled: false }).then(v => setEvaluationEnabled(v.enabled === true)).catch(() => setEvaluationEnabled(false)); }, []);
   useEffect(() => {
     if (!playing || session?.status !== 'running') return;
     timer.current = window.setTimeout(() => request('/api/session/next', 'POST'), 1050);
@@ -45,6 +53,7 @@ export default function App() {
   }, [playing, session?.status, session?.step_count]);
   useEffect(() => { if (session?.status === 'pending_approval' || session?.status === 'complete') setPlaying(false); }, [session?.status]);
   useEffect(() => {
+    if (PUBLIC_DEMO) return;
     if (session?.mode !== 'distributed') { setAgentStatuses({}); return; }
     let active = true; let retry: number | undefined; let socket: WebSocket;
     const connect = () => { socket = new WebSocket('ws://127.0.0.1:8000/ws/dashboard'); socket.onmessage = (event) => {
@@ -55,7 +64,8 @@ export default function App() {
   }, [session?.mode]);
   async function toggleInspector() {
     if (!showInspector && !inspector) {
-      try { const result = await fetch(`${API}/api/inspector`); if (!result.ok) throw new Error((await result.json()).detail || 'Inspector unavailable.'); setInspector(await result.json()); } catch { setError('Inspector could not load. Enable local demo/debug mode in the backend configuration first.'); }
+      if (PUBLIC_DEMO) setInspector(publicDemo.inspector() as unknown as Inspector);
+      else try { const result = await fetch(`${API}/api/inspector`); if (!result.ok) throw new Error((await result.json()).detail || 'Inspector unavailable.'); setInspector(await result.json()); } catch { setError('Inspector could not load. Enable local demo/debug mode in the backend configuration first.'); }
     }
     setShowInspector(!showInspector);
   }
@@ -65,11 +75,11 @@ export default function App() {
   const status = session?.status || 'idle';
   const outcome = session?.outcome;
   const progress = status === 'complete' ? 100 : status === 'idle' ? 0 : (session?.mode === 'live' || session?.mode === 'distributed') ? Math.min(100, ((session.round || 0) / (session.max_rounds || 10)) * 100) : Math.min(90, (session?.step_count || 0) * 12);
-  if (showEvaluation) return <EvaluationDashboard onBack={() => setShowEvaluation(false)} />;
+  if (!PUBLIC_DEMO && showEvaluation) return <EvaluationDashboard onBack={() => setShowEvaluation(false)} />;
   return <div className="app-shell">
-    <header className="topbar"><div className="brand"><span className="brand-mark">✳</span><span>AGENT <strong>DIPLOMACY</strong></span></div><div className="topbar-right"><span className="simulation-label"><span className="live-dot"/> {session?.mode === 'distributed' ? 'DISTRIBUTED AGENTS' : session?.mode === 'live' ? 'REAL AI MODE' : 'SCRIPTED DEMO'} <i/> FICTIONAL DATA</span>{evaluationEnabled && <button className="text-button" onClick={() => setShowEvaluation(true)}><FlaskConical size={16}/> Evaluation</button>}<button className="text-button" onClick={() => setShowAudit(!showAudit)}><Eye size={16}/> View audit log</button></div></header>
+    <header className="topbar"><div className="brand"><span className="brand-mark">✳</span><span>AGENT <strong>DIPLOMACY</strong></span></div><div className="topbar-right"><span className="simulation-label"><span className="live-dot"/> {PUBLIC_DEMO ? 'PUBLIC SCRIPTED DEMO' : session?.mode === 'distributed' ? 'DISTRIBUTED AGENTS' : session?.mode === 'live' ? 'REAL AI MODE' : 'SCRIPTED DEMO'} <i/> FICTIONAL DATA</span>{!PUBLIC_DEMO && evaluationEnabled && <button className="text-button" onClick={() => setShowEvaluation(true)}><FlaskConical size={16}/> Evaluation</button>}<button className="text-button" onClick={() => setShowAudit(!showAudit)}><Eye size={16}/> View audit log</button></div></header>
     <main>
-      <section className="hero"><div className="hero-copy"><div className="eyebrow">THE FUTURE OF BOUNDED DELEGATION <span> / V2 LOCAL PROTOTYPE</span></div><h1>Let agents find the plan.<br/><em>Keep your boundaries.</em></h1><p>Three friends. One Miami trip. Watch their agents negotiate shared plans while local policies decide what can be said, agreed to, or escalated to a person.</p><div className="mode-selector" role="group" aria-label="Negotiation mode"><button className={(session?.mode === 'scripted' || !session?.mode) ? 'selected' : ''} disabled={busy} onClick={() => changeMode('scripted')}>Scripted Demo</button><button className={session?.mode === 'live' ? 'selected' : ''} disabled={busy} onClick={() => changeMode('live')}>V1 Real AI</button><button className={session?.mode === 'distributed' ? 'selected' : ''} disabled={busy} onClick={() => changeMode('distributed')}>Distributed V2</button></div><div className="hero-actions">{status === 'idle' ? <button className="primary-button" disabled={busy} onClick={() => request('/api/session/start', 'POST')}>Start Negotiation <ArrowRight size={17}/></button> : <><button className="primary-button" disabled={busy || (status !== 'running' && status !== 'paused')} onClick={() => request('/api/session/next', 'POST')}>{status === 'paused' ? 'Reconnect & Resume' : 'Next Step'} <ArrowRight size={17}/></button><button className="secondary-button" disabled={busy || (status !== 'running' && !playing)} onClick={() => setPlaying(!playing)}>{playing ? <Pause size={17}/> : <Play size={17}/>} {playing ? 'Pause' : 'Auto Play'}</button><button className="icon-button" aria-label="Reset simulation" onClick={reset}><RotateCcw size={17}/></button></>}</div><div className="hero-note"><ShieldCheck size={17}/> {session?.mode === 'distributed' ? 'Separate local agent processes · WebSocket · No bookings or payments' : session?.mode === 'live' ? 'V1 model calls · Policy checked · No bookings or payments' : 'Deterministic script · Real policy checks · No model calls'}</div></div><div className="hero-art"><div className="sun"/><div className="water water-one"/><div className="water water-two"/><div className="art-label"><MapPin size={15}/> MIAMI · 5 DAYS / 4 NIGHTS</div><div className="hero-art-quote">A better plan begins<br/>with a clear boundary.</div></div></section>
+      <section className="hero"><div className="hero-copy"><div className="eyebrow">THE FUTURE OF BOUNDED DELEGATION <span> / {PUBLIC_DEMO ? 'PUBLIC INTERACTIVE DEMO' : 'V2 LOCAL PROTOTYPE'}</span></div><h1>Let agents find the plan.<br/><em>Keep your boundaries.</em></h1><p>Three friends. One Miami trip. Watch their agents negotiate shared plans while local policies decide what can be said, agreed to, or escalated to a person.</p>{!PUBLIC_DEMO && <div className="mode-selector" role="group" aria-label="Negotiation mode"><button className={(session?.mode === 'scripted' || !session?.mode) ? 'selected' : ''} disabled={busy} onClick={() => changeMode('scripted')}>Scripted Demo</button><button className={session?.mode === 'live' ? 'selected' : ''} disabled={busy} onClick={() => changeMode('live')}>V1 Real AI</button><button className={session?.mode === 'distributed' ? 'selected' : ''} disabled={busy} onClick={() => changeMode('distributed')}>Distributed V2</button></div>}<div className="hero-actions">{status === 'idle' ? <button className="primary-button" disabled={busy} onClick={() => request('/api/session/start', 'POST')}>Start Negotiation <ArrowRight size={17}/></button> : <><button className="primary-button" disabled={busy || (status !== 'running' && status !== 'paused')} onClick={() => request('/api/session/next', 'POST')}>{status === 'paused' ? 'Reconnect & Resume' : 'Next Step'} <ArrowRight size={17}/></button><button className="secondary-button" disabled={busy || (status !== 'running' && !playing)} onClick={() => setPlaying(!playing)}>{playing ? <Pause size={17}/> : <Play size={17}/>} {playing ? 'Pause' : 'Auto Play'}</button><button className="icon-button" aria-label="Reset simulation" onClick={reset}><RotateCcw size={17}/></button></>}</div><div className="hero-note"><ShieldCheck size={17}/> {PUBLIC_DEMO ? 'Browser-local replay of the real scripted policy flow · no model calls or payments' : session?.mode === 'distributed' ? 'Separate local agent processes · WebSocket · No bookings or payments' : session?.mode === 'live' ? 'V1 model calls · Policy checked · No bookings or payments' : 'Deterministic script · Real policy checks · No model calls'}</div></div><div className="hero-art"><div className="sun"/><div className="water water-one"/><div className="water water-two"/><div className="art-label"><MapPin size={15}/> MIAMI · 5 DAYS / 4 NIGHTS</div><div className="hero-art-quote">A better plan begins<br/>with a clear boundary.</div></div></section>
       {error && <div className="error" role="alert">{error}</div>}
       <section className="overview-bar"><div><span className="section-overline">THE SCENARIO</span><strong>A shared trip, three distinct priorities</strong></div><div className="overview-stats"><span><b>03</b> travelers</span><span><b>05</b> days</span><span><b>01</b> shared proposal</span></div></section>
       <section className="profiles"><div className="section-heading"><div><span className="section-overline">01 / THE PEOPLE</span><h2>Meet the travelers</h2></div><button className={`inspector-toggle ${showInspector ? 'active' : ''}`} onClick={toggleInspector}><LockKeyhole size={15}/> Owner / Demo Inspector <ChevronDown size={14}/></button></div><div className="profile-grid">{session?.profiles.map((p, i) => <article className="profile-card" key={p.name}><div className="profile-top"><span className={`avatar ${colors[p.name]}`}>{names[p.name]}</span><span className="profile-number">{session.mode === 'distributed' ? (agentStatuses[p.name.toLowerCase()] || session.agents?.[p.name.toLowerCase()] || 'offline').toUpperCase() : `0${i+1}`}</span></div><h3>{p.name}</h3><p className="profile-role">{p.role}</p><div className="profile-divider"/><span className="small-label">PUBLIC PRIORITIES</span><ul>{p.public_goals.map(g => <li key={g}><Check size={14}/>{g}</li>)}</ul></article>)}</div>{showInspector && <div className="inspector-panel"><div className="inspector-intro"><LockKeyhole size={17}/><div><strong>Owner / Demo Inspector</strong><p>Fictional source profiles shown for demonstration. These details never appear in inter-agent events.</p></div></div><div className="inspector-grid">{inspector?.profiles.map(p => <div key={p.name}><strong>{p.name}</strong><p><b>Local private data</b><br/>{Object.entries(p.private).map(([k,v]) => `${k.replaceAll('_',' ')}: ${v}`).join(' · ')}</p><p><b>Local policy</b><br/>{Object.entries(p.policy).map(([k,v]) => `${k.replaceAll('_',' ')}: ${v}`).join(' · ')}</p></div>)}</div></div>}</section>
